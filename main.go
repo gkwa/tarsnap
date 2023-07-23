@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -71,7 +72,7 @@ func main() {
 	// Remove timestamp from log output
 	log.SetFlags(0)
 
-	// Define and parse the ip, launchd, label and cwd flags
+	// Define and parse the ip, launchd, label, and cwd flags
 	ipPtr := flag.String("ip", "", "IP address to use instead of running Terraform")
 	launchdPtr := flag.Bool("launchd", false, "Create launchd .plist file")
 	labelPtr := flag.String("label", "com.mytarsnap", "The label for the .plist file")
@@ -172,7 +173,7 @@ func main() {
 		log.Fatalf("Failed to get absolute path: %v", err)
 	}
 
-	// Execute the scp command to copy the remote bash history file to local machine
+	// Execute the scp command to copy the remote bash history file to the local machine
 	cmd := exec.Command("scp", fmt.Sprintf("%s@%s:~/.bash_history", user, ip), absLocalFile)
 	log.Println("Executing command:", cmd.String()) // Logging the command
 	out, err := cmd.CombinedOutput()
@@ -180,10 +181,74 @@ func main() {
 		log.Fatalf("Failed to execute command: %v", err)
 	}
 
-	log.Println("Successfully copied remote bash history file to local machine.")
+	log.Println("Successfully copied remote bash history file to the local machine.")
 
 	log.Println("Output from the scp command:")
 	log.Println(string(out))
 
+	// Loop over all the files in the data/bash_history directory
+	log.Println("Summary of data files:")
+	lineCounts := make(map[string]int)
+	aggregateLines := []string{}
+
+	err = filepath.Walk(localDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			// Only consider regular files
+			fileLines, lines, err := readLines(path)
+			if err != nil {
+				return err
+			}
+			lineCounts[path] = fileLines
+			aggregateLines = append(aggregateLines, lines...)
+		}
+		return nil
+	})
+
+	if err != nil {
+		log.Fatalf("Failed to walk through files: %v", err)
+	}
+
+	// Display the summary of data files
+	for path, count := range lineCounts {
+		log.Printf("File: %s, Line Count: %d", path, count)
+	}
+
+	// Get the unique line count for the aggregate of all files
+	uniqueLineCount := getUniqueLineCount(aggregateLines)
+	log.Printf("Unique Line Count for Aggregate of All Files: %d", uniqueLineCount)
+
 	log.Println("Finished.")
+}
+
+// readLines reads all lines from a file and returns the line count and slice of lines
+func readLines(filename string) (int, []string, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer file.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+
+	if err := scanner.Err(); err != nil {
+		return 0, nil, err
+	}
+
+	return len(lines), lines, nil
+}
+
+// getUniqueLineCount returns the count of unique lines in a slice
+func getUniqueLineCount(lines []string) int {
+	uniqueLines := make(map[string]struct{})
+	for _, line := range lines {
+		uniqueLines[line] = struct{}{}
+	}
+	return len(uniqueLines)
 }
