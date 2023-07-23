@@ -168,9 +168,6 @@ func getUniqueBashLines(logDir string) []string {
 }
 
 func main() {
-	// Remove timestamp from log output
-	log.SetFlags(0)
-
 	// Define and parse the ip, launchd, label, and cwd flags
 	ipPtr := flag.String("ip", "", "IP address to use instead of running Terraform")
 	launchdPtr := flag.Bool("launchd", false, "Create launchd .plist file")
