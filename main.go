@@ -51,7 +51,7 @@ const PlistTemplate = `
 </dict>
 
   <key>StartInterval</key>
-  <integer>3600</integer>
+  <integer>600</integer>
 
   <key>StandardOutPath</key>
   <string>{{.LogPath}}</string>
