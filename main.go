@@ -75,9 +75,22 @@ func main() {
 	// Define and parse the ip, launchd, label, and cwd flags
 	ipPtr := flag.String("ip", "", "IP address to use instead of running Terraform")
 	launchdPtr := flag.Bool("launchd", false, "Create launchd .plist file")
-	labelPtr := flag.String("label", "com.mytarsnap", "The label for the .plist file")
+	labelPtr := flag.String("label", "com.tarsnap", "The label for the .plist file")
 	cwdPtr := flag.String("cwd", ".", "Working directory for the launchd task")
+	showFullPtr := flag.Bool("show-full", false, "Show the unique list of lines to stdout")
 	flag.Parse()
+
+	var absCwd string
+
+	// If --show-full flag is provided, only show the unique list of bash lines
+	if *showFullPtr {
+		logDir := "./data/bash_history"
+		uniqueLines := getUniqueBashLines(logDir)
+		for _, line := range uniqueLines {
+			fmt.Println(line)
+		}
+		return
+	}
 
 	// Expand cwd into an absolute path
 	absCwd, err := filepath.Abs(*cwdPtr)
@@ -251,4 +264,50 @@ func getUniqueLineCount(lines []string) int {
 		uniqueLines[line] = struct{}{}
 	}
 	return len(uniqueLines)
+}
+
+// getUniqueBashLines returns the unique list of bash lines from all data files
+func getUniqueBashLines(logDir string) []string {
+	// Map to store the unique lines
+	uniqueLines := make(map[string]struct{})
+
+	// Walk through the files in the directory
+	filepath.Walk(logDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			log.Fatalf("Failed to walk through files: %v", err)
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+
+		// Open the file
+		file, err := os.Open(path)
+		if err != nil {
+			log.Fatalf("Failed to open file: %v", err)
+		}
+		defer file.Close()
+
+		// Scan the lines and add unique lines to the map
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Text()
+			uniqueLines[line] = struct{}{}
+		}
+
+		if err := scanner.Err(); err != nil {
+			log.Fatalf("Failed to scan file: %v", err)
+		}
+
+		return nil
+	})
+
+	// Convert the map keys to a slice of strings and return
+	var lines []string
+	for line := range uniqueLines {
+		lines = append(lines, line)
+	}
+
+	return lines
 }
