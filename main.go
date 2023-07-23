@@ -284,6 +284,13 @@ func main() {
 		log.Fatalf("Failed to create directory: %v", err)
 	}
 
+	localDir, err = filepath.Abs(localDir)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	fmt.Println(localDir)
+
 	// Append current timestamp to the filename
 	localFile := fmt.Sprintf("%s/bash_history_%s.txt", localDir, time.Now().Format("20060102_150405"))
 	absLocalFile, err := filepath.Abs(localFile)
