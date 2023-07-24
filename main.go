@@ -298,8 +298,9 @@ func main() {
 		log.Fatalf("Failed to get absolute path: %v", err)
 	}
 
-	// Execute the scp command to copy the remote bash history file to the local machine
-	cmd := exec.Command("scp", fmt.Sprintf("%s@%s:~/.bash_history", user, ip), absLocalFile)
+	// Create the command with scp and arguments
+	cmd := exec.Command("scp", "-o", "ConnectTimeout=10", fmt.Sprintf("%s@%s:~/.bash_history", user, ip), absLocalFile)
+
 	log.Println("Executing command:", cmd.String()) // Logging the command
 	out, err := cmd.CombinedOutput()
 	if err != nil {
