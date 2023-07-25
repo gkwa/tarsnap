@@ -80,8 +80,14 @@ func generateSummaryFile(logDir string) {
 	}
 	defer summaryFile.Close()
 
+	// commands less than 10 chars are not worth saving
+	MAX_LEN := 10
 	// Write the unique lines to the summary file
 	for _, line := range uniqueLines {
+
+		if len(line) < MAX_LEN {
+			continue
+		}
 		_, err := fmt.Fprintln(summaryFile, line)
 		if err != nil {
 			log.Fatalf("Failed to write to summary.txt: %v", err)
