@@ -210,10 +210,31 @@ func main() {
 	} else {
 		log.Println("Running Terraform command to get output...")
 
-		out, err := exec.Command("terraform", "-chdir=./terraform", "output", "-json").Output()
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Println("Error getting current working directory:", err)
+			return
+		}
+
+		tfpath := filepath.Join(cwd, "terraform")
+
+		cmdName := "terraform"
+		args := []string{fmt.Sprintf("-chdir=%s", tfpath), "output", "-json"}
+
+		// Prepare the command
+		cmd := exec.Command(cmdName, args...)
+
+		// Print string representation of the command
+		log.Printf("Executing command: %s %s", cmdName, strings.Join(args, " "))
+
+		// Run the command
+		out, err := cmd.Output()
 		if err != nil {
 			log.Fatalf("Failed to execute command: %v", err)
 		}
+
+		// Process output
+		// log.Println(string(out))
 
 		log.Println("Parsing JSON output...")
 
@@ -224,6 +245,10 @@ func main() {
 		}
 
 		ip = tfOutput.InstancePublicIP.Value
+
+		if ip == "" {
+			log.Fatal("cound not get ip, quitting")
+		}
 	}
 
 	log.Println("Creating launchd .plist file...")
@@ -287,7 +312,7 @@ func main() {
 	}
 
 	if strings.Contains(out.String(), launctlTask) {
-		fmt.Printf("'%s' found, running 'launchctl remove %s'", launctlTask, launctlTask)
+		fmt.Printf("%s found, running launchctl remove %s\n", launctlTask, launctlTask)
 		cmd = exec.Command("launchctl", "remove", launctlTask)
 		err = cmd.Run()
 
@@ -295,7 +320,31 @@ func main() {
 			log.Fatal(err)
 		}
 	} else {
-		fmt.Printf("'%s' not found", launctlTask)
+		fmt.Printf("%s not found\n", launctlTask)
+	}
+
+	fmt.Printf("running command launchctl load %s\n", filename)
+	cmd = exec.Command("launchctl", "load", filename)
+	err = cmd.Run()
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// check that it loaded
+	cmd = exec.Command("launchctl", "list")
+	var out3 bytes.Buffer
+	cmd.Stdout = &out3
+	err = cmd.Run()
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if strings.Contains(out3.String(), launctlTask) {
+		fmt.Printf("%s found, its loaded\n", launctlTask)
+	} else {
+		fmt.Printf("%s not found, load failed", launctlTask)
 	}
 
 	log.Println("Copying remote bash history file to the local machine...")
@@ -327,8 +376,29 @@ func main() {
 	// Create the command with scp and arguments
 	cmd = exec.Command("scp", "-o", "ConnectTimeout=10", fmt.Sprintf("%s@%s:~/.bash_history", user, ip), absLocalFile)
 
-	log.Println("Executing command:", cmd.String()) // Logging the command
-	out, err = cmd.CombinedOutput()
+	// Logging the command
+	log.Printf("Executing command: scp -o ConnectTimeout=10 %s@%s:~/.bash_history %s\n", user, ip, absLocalFile)
+
+	// Run the command and capture the combined output
+	outBytes, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Fatalf("Failed to execute command: %v", err)
+	}
+
+	// First, declare a bytes.Buffer
+	var out1 bytes.Buffer
+
+	// Then, write the output to the buffer
+	_, err = out1.Write(outBytes)
+	if err != nil {
+		log.Fatalf("Failed to write to buffer: %v", err)
+	}
+
+	// To print the content of the buffer, you can convert it to a string:
+	log.Println(out.String())
+
+	log.Println(out) // Print the output
+
 	if err != nil {
 		log.Fatalf("Failed to execute command: %v", err)
 	}
@@ -336,7 +406,6 @@ func main() {
 	log.Println("Successfully copied remote bash history file to the local machine.")
 
 	log.Println("Output from the scp command:")
-	log.Println(string(out))
 
 	// Loop over all the files in the data/bash_history directory
 	log.Println("Summary of data files:")
