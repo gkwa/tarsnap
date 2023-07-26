@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"text/template"
 	"time"
 )
@@ -176,7 +178,6 @@ func getUniqueBashLines(logDir string) []string {
 func main() {
 	// Define and parse the ip, launchd, label, and cwd flags
 	ipPtr := flag.String("ip", "", "IP address to use instead of running Terraform")
-	launchdPtr := flag.Bool("launchd", false, "Create launchd .plist file")
 	labelPtr := flag.String("label", "com.tarsnap", "The label for the .plist file")
 	cwdPtr := flag.String("cwd", ".", "Working directory for the launchd task")
 	showFullPtr := flag.Bool("show-full", false, "Show the unique list of lines to stdout")
@@ -225,57 +226,76 @@ func main() {
 		ip = tfOutput.InstancePublicIP.Value
 	}
 
-	// Create a launchd .plist file if the launchd flag is set
-	if *launchdPtr {
-		log.Println("Creating launchd .plist file...")
+	log.Println("Creating launchd .plist file...")
 
-		tmpl, err := template.New("plist").Parse(PlistTemplate)
+	tmpl, err := template.New("plist").Parse(PlistTemplate)
+	if err != nil {
+		log.Fatalf("Failed to create template: %v", err)
+	}
+
+	exePath, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+
+	absExePath, err := filepath.Abs(exePath)
+	if err != nil {
+		panic(err)
+	}
+
+	exeDir := filepath.Dir(absExePath)
+	fmt.Println("Executable Path:", absExePath)
+	fmt.Println("Executable Directory:", exeDir)
+
+	exeName := filepath.Base(exePath)
+	fmt.Println(exeName)
+
+	launctlTask := fmt.Sprintf("%s.%s", *labelPtr, ip)
+
+	// Here's where we change the filename and label logic
+	filename := fmt.Sprintf("%s.plist", launctlTask)
+
+	data := PlistData{
+		Label:   filename[:len(filename)-6], // trim .plist extension
+		IP:      ip,
+		Args:    absExePath,
+		Path:    exeDir,
+		Cwd:     absCwd,
+		LogPath: fmt.Sprintf("/tmp/%s.log", os.Args[0]),
+	}
+
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Fatalf("Failed to create .plist file: %v", err)
+	}
+	defer file.Close()
+
+	err = tmpl.Execute(file, data)
+	if err != nil {
+		log.Fatalf("Failed to execute template: %v", err)
+	}
+
+	log.Println("Successfully created launchd .plist file.")
+
+	cmd := exec.Command("launchctl", "list")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err = cmd.Run()
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if strings.Contains(out.String(), launctlTask) {
+		fmt.Printf("'%s' found, running 'launchctl remove %s'", launctlTask, launctlTask)
+		cmd = exec.Command("launchctl", "remove", launctlTask)
+		err = cmd.Run()
+
 		if err != nil {
-			log.Fatalf("Failed to create template: %v", err)
+			log.Fatal(err)
 		}
-
-		exePath, err := os.Executable()
-		if err != nil {
-			panic(err)
-		}
-
-		absExePath, err := filepath.Abs(exePath)
-		if err != nil {
-			panic(err)
-		}
-
-		exeDir := filepath.Dir(absExePath)
-		fmt.Println("Executable Path:", absExePath)
-		fmt.Println("Executable Directory:", exeDir)
-
-		exeName := filepath.Base(exePath)
-		fmt.Println(exeName)
-
-		// Here's where we change the filename and label logic
-		filename := fmt.Sprintf("%s.%s.plist", *labelPtr, ip)
-
-		data := PlistData{
-			Label:   filename[:len(filename)-6], // trim .plist extension
-			IP:      ip,
-			Args:    absExePath,
-			Path:    exeDir,
-			Cwd:     absCwd,
-			LogPath: fmt.Sprintf("/tmp/%s.log", os.Args[0]),
-		}
-
-		file, err := os.Create(filename)
-		if err != nil {
-			log.Fatalf("Failed to create .plist file: %v", err)
-		}
-		defer file.Close()
-
-		err = tmpl.Execute(file, data)
-		if err != nil {
-			log.Fatalf("Failed to execute template: %v", err)
-		}
-
-		log.Println("Successfully created launchd .plist file.")
-		return
+	} else {
+		fmt.Printf("'%s' not found", launctlTask)
 	}
 
 	log.Println("Copying remote bash history file to the local machine...")
@@ -305,10 +325,10 @@ func main() {
 	}
 
 	// Create the command with scp and arguments
-	cmd := exec.Command("scp", "-o", "ConnectTimeout=10", fmt.Sprintf("%s@%s:~/.bash_history", user, ip), absLocalFile)
+	cmd = exec.Command("scp", "-o", "ConnectTimeout=10", fmt.Sprintf("%s@%s:~/.bash_history", user, ip), absLocalFile)
 
 	log.Println("Executing command:", cmd.String()) // Logging the command
-	out, err := cmd.CombinedOutput()
+	out, err = cmd.CombinedOutput()
 	if err != nil {
 		log.Fatalf("Failed to execute command: %v", err)
 	}
