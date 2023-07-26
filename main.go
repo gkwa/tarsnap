@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -24,12 +25,13 @@ type TerraformOutput struct {
 
 // PlistData holds the data to be filled in the plist template
 type PlistData struct {
-	Label   string
-	IP      string
-	Args    string
-	Path    string
-	Cwd     string
-	LogPath string
+	Label         string
+	IP            string
+	Args          string
+	Path          string
+	Cwd           string
+	LogPath       string
+	StartInterval string
 }
 
 // PlistTemplate is the boilerplate for the .plist file
@@ -49,11 +51,11 @@ const PlistTemplate = `
   <key>EnvironmentVariables</key>
 <dict>
   <key>PATH</key>
-  <string>/usr/local/bin:{{.Path}}/go/bin:/usr/bin:/bin:/usr/sbin:/sbin:</string>
+  <string>/usr/local/bin:{{.Path}}:/usr/bin:/bin:/usr/sbin:/sbin:</string>
 </dict>
 
   <key>StartInterval</key>
-  <integer>600</integer>
+  <integer>{{.StartInterval}}</integer>
 
   <key>StandardOutPath</key>
   <string>{{.LogPath}}</string>
@@ -175,28 +177,57 @@ func getUniqueBashLines(logDir string) []string {
 	return lines
 }
 
+// Config struct to hold the values
+type Config struct {
+	IP       string
+	Label    string
+	CWD      string
+	ShowFull bool
+	Install  bool
+	Delay    time.Duration
+}
+
 func main() {
-	// Define and parse the ip, launchd, label, and cwd flags
-	ipPtr := flag.String("ip", "", "IP address to use instead of running Terraform")
-	labelPtr := flag.String("label", "com.tarsnap", "The label for the .plist file")
-	cwdPtr := flag.String("cwd", ".", "Working directory for the launchd task")
-	showFullPtr := flag.Bool("show-full", false, "Show the unique list of lines to stdout")
+	config := Config{}
+	flag.StringVar(&config.IP, "ip", "", "IP address to use instead of running Terraform")
+	flag.StringVar(&config.Label, "label", "com.tarsnap", "The label for the .plist file")
+	flag.StringVar(&config.CWD, "cwd", ".", "Working directory for the launchd task")
+	flag.BoolVar(&config.ShowFull, "show-full", false, "Show the unique list of lines to stdout")
+	flag.BoolVar(&config.Install, "install", false, "Install launchd plist and exit")
+	flag.DurationVar(&config.Delay, "delay", 10*time.Minute, "Delay between successive fetches")
 	flag.Parse()
+
+	ip, err := setup(config)
+	if err != nil {
+		panic(err)
+	}
+
+	if config.Install {
+		return
+	}
+
+	dowork(ip)
+}
+
+func setup(config Config) (string, error) {
+	// func setup(config struct) (string, error) {
+	log.SetFlags(log.LstdFlags | log.Llongfile)
+	log.Println("This is a test message")
 
 	var absCwd string
 
 	// If --show-full flag is provided, only show the unique list of bash lines
-	if *showFullPtr {
+	if config.ShowFull {
 		logDir := "./data/bash_history"
 		uniqueLines := getUniqueBashLines(logDir)
 		for _, line := range uniqueLines {
 			fmt.Println(line)
 		}
-		return
+		return "", nil
 	}
 
 	// Expand cwd into an absolute path
-	absCwd, err := filepath.Abs(*cwdPtr)
+	absCwd, err := filepath.Abs(config.CWD)
 	if err != nil {
 		log.Fatalf("Failed to get absolute path: %v", err)
 	}
@@ -204,16 +235,16 @@ func main() {
 	var ip string
 
 	// Check if the ip flag was set
-	if *ipPtr != "" {
+	if config.IP != "" {
 		log.Println("Using provided IP address...")
-		ip = *ipPtr
+		ip = config.IP
 	} else {
 		log.Println("Running Terraform command to get output...")
 
 		cwd, err := os.Getwd()
 		if err != nil {
 			fmt.Println("Error getting current working directory:", err)
-			return
+			return "", err
 		}
 
 		tfpath := filepath.Join(cwd, "terraform")
@@ -275,21 +306,50 @@ func main() {
 	exeName := filepath.Base(exePath)
 	fmt.Println(exeName)
 
-	launctlTask := fmt.Sprintf("%s.%s", *labelPtr, ip)
+	launctlTask := fmt.Sprintf("%s.%s", config.Label, ip)
 
-	// Here's where we change the filename and label logic
-	filename := fmt.Sprintf("%s.plist", launctlTask)
+	// get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Error getting current directory:", err)
+		return "", err
+	}
+	fmt.Println("CWD:", cwd)
 
-	data := PlistData{
-		Label:   filename[:len(filename)-6], // trim .plist extension
-		IP:      ip,
-		Args:    absExePath,
-		Path:    exeDir,
-		Cwd:     absCwd,
-		LogPath: fmt.Sprintf("/tmp/%s.log", os.Args[0]),
+	// Get the user's home directory
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Println("Error getting home directory:", err)
+		return "", err
 	}
 
-	file, err := os.Create(filename)
+	// Join the home directory with the target path
+	LaunchAgentsDir := filepath.Join(home, "Library/LaunchAgents/")
+
+	fmt.Println(LaunchAgentsDir)
+
+	// concatenate cwd with the plist file name
+	plist := fmt.Sprintf("%s/%s.plist", LaunchAgentsDir, launctlTask)
+
+	// Get the base name
+	baseName := filepath.Base(plist)
+
+	// Remove the extension
+	baseNameWithoutExt := strings.TrimSuffix(baseName, filepath.Ext(baseName))
+
+	fmt.Println(baseNameWithoutExt)
+
+	data := PlistData{
+		Label:         baseNameWithoutExt,
+		IP:            ip,
+		StartInterval: strconv.Itoa(int(config.Delay.Seconds())),
+		Args:          absExePath,
+		Path:          exeDir,
+		Cwd:           absCwd,
+		LogPath:       fmt.Sprintf("/tmp/%s.log", "tarsnap"),
+	}
+
+	file, err := os.Create(plist)
 	if err != nil {
 		log.Fatalf("Failed to create .plist file: %v", err)
 	}
@@ -302,59 +362,22 @@ func main() {
 
 	log.Println("Successfully created launchd .plist file.")
 
-	cmd := exec.Command("launchctl", "list")
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	err = cmd.Run()
+	// removeLaunchdTarsnap(launctlTask)
+	loadLaunchdTarsnap(launctlTask, plist)
+	searchLaunchdList(launctlTask)
+	time.Sleep(500 * time.Millisecond)
+	searchLaunchdList(launctlTask)
 
-	if err != nil {
-		log.Fatal(err)
-	}
+	return ip, nil
+}
 
-	if strings.Contains(out.String(), launctlTask) {
-		fmt.Printf("%s found, running launchctl remove %s\n", launctlTask, launctlTask)
-		cmd = exec.Command("launchctl", "remove", launctlTask)
-		err = cmd.Run()
-
-		if err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		fmt.Printf("%s not found\n", launctlTask)
-	}
-
-	fmt.Printf("running command launchctl load %s\n", filename)
-	cmd = exec.Command("launchctl", "load", filename)
-	err = cmd.Run()
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// check that it loaded
-	cmd = exec.Command("launchctl", "list")
-	var out3 bytes.Buffer
-	cmd.Stdout = &out3
-	err = cmd.Run()
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if strings.Contains(out3.String(), launctlTask) {
-		fmt.Printf("%s found, its loaded\n", launctlTask)
-	} else {
-		fmt.Printf("%s not found, load failed", launctlTask)
-	}
-
-	log.Println("Copying remote bash history file to the local machine...")
-
+func dowork(ip string) {
 	// Set SSH user
 	user := "root"
 
 	// Create local directory if it does not exist
 	localDir := "./data/bash_history"
-	err = os.MkdirAll(localDir, 0o755)
+	err := os.MkdirAll(localDir, 0o755)
 	if err != nil {
 		log.Fatalf("Failed to create directory: %v", err)
 	}
@@ -374,7 +397,9 @@ func main() {
 	}
 
 	// Create the command with scp and arguments
-	cmd = exec.Command("scp", "-o", "ConnectTimeout=10", fmt.Sprintf("%s@%s:~/.bash_history", user, ip), absLocalFile)
+	cmd := exec.Command("scp", "-o", "ConnectTimeout=10", fmt.Sprintf("%s@%s:~/.bash_history", user, ip), absLocalFile)
+
+	log.Println("Copying remote bash history file to the local machine...")
 
 	// Logging the command
 	log.Printf("Executing command: scp -o ConnectTimeout=10 %s@%s:~/.bash_history %s\n", user, ip, absLocalFile)
@@ -386,10 +411,10 @@ func main() {
 	}
 
 	// First, declare a bytes.Buffer
-	var out1 bytes.Buffer
+	var out bytes.Buffer
 
 	// Then, write the output to the buffer
-	_, err = out1.Write(outBytes)
+	_, err = out.Write(outBytes)
 	if err != nil {
 		log.Fatalf("Failed to write to buffer: %v", err)
 	}
@@ -445,4 +470,77 @@ func main() {
 
 	// Generate summary.txt file containing unique list of bash lines
 	generateSummaryFile(localDir)
+}
+
+func searchLaunchdList(launctlTask string) {
+	cmd := exec.Command("launchctl", "list")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	lines := strings.Split(out.String(), "\n")
+	found := false
+	for _, line := range lines {
+		if strings.Contains(line, launctlTask) {
+			fmt.Printf("%s\n", line)
+			found = true
+			break
+		}
+	}
+
+	if found {
+		fmt.Printf("%s found, load was successful\n", launctlTask)
+	} else {
+		fmt.Printf("%s not found, load failed\n", launctlTask)
+	}
+}
+
+func loadLaunchdTarsnap(launctlTask, plist string) {
+	fmt.Printf("running command launchctl load %s\n", plist)
+	cmd := exec.Command("launchctl", "load", plist)
+	err := cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func removeLaunchdTarsnap(launctlTask string) {
+	cmd := exec.Command("launchctl", "list")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if strings.Contains(out.String(), launctlTask) {
+		fmt.Printf("%s found, running launchctl remove %s\n", launctlTask, launctlTask)
+		cmd = exec.Command("launchctl", "remove", launctlTask)
+		err = cmd.Run()
+
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		fmt.Printf("%s not found\n", launctlTask)
+	}
+
+	// verify its no longer loaded
+	cmd = exec.Command("launchctl", "list")
+	var out3 bytes.Buffer
+	cmd.Stdout = &out3
+	err = cmd.Run()
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if strings.Contains(out3.String(), launctlTask) {
+		fmt.Printf("%s found, its still loaded but we expect it should have been reomoved\n", launctlTask)
+	} else {
+		fmt.Printf("%s not found, load failed\n", launctlTask)
+	}
 }
