@@ -189,7 +189,6 @@ type Config struct {
 
 func main() {
 	config := Config{}
-	flag.StringVar(&config.IP, "ip", "", "IP address to use instead of running Terraform")
 	flag.StringVar(&config.Label, "label", "com.tarsnap", "The label for the .plist file")
 	flag.StringVar(&config.CWD, "cwd", ".", "Working directory for the launchd task")
 	flag.BoolVar(&config.ShowFull, "show-full", false, "Show the unique list of lines to stdout")
@@ -197,19 +196,59 @@ func main() {
 	flag.DurationVar(&config.Delay, "delay", 10*time.Minute, "Delay between successive fetches")
 	flag.Parse()
 
-	ip, err := setup(config)
-	if err != nil {
-		panic(err)
-	}
-
 	if config.Install {
+		err := setup(config)
+		if err != nil {
+			panic(err)
+		}
 		return
 	}
 
-	dowork(ip)
+	dowork()
 }
 
-func setup(config Config) (string, error) {
+func getip() (string, error) {
+	log.Println("Running Terraform command to get output...")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Error getting current working directory:", err)
+		return "", err
+	}
+
+	tfpath := filepath.Join(cwd, "./terraform")
+
+	cmdName := "terraform"
+	args := []string{fmt.Sprintf("-chdir=%s", tfpath), "output", "-json"}
+
+	// Prepare the command
+	cmd := exec.Command(cmdName, args...)
+
+	// Print string representation of the command
+	log.Printf("Executing command: %s %s", cmdName, strings.Join(args, " "))
+
+	// Run the command
+	out, err := cmd.Output()
+	if err != nil {
+		log.Fatalf("Failed to execute command: %v", err)
+	}
+
+	// Process output
+	// log.Println(string(out))
+
+	log.Println("Parsing JSON output...")
+
+	var tfOutput TerraformOutput
+	err = json.Unmarshal(out, &tfOutput)
+	if err != nil {
+		log.Fatalf("Failed to parse JSON: %v", err)
+	}
+
+	return tfOutput.InstancePublicIP.Value, err
+
+}
+
+func setup(config Config) error {
 	// func setup(config struct) (string, error) {
 	log.SetFlags(log.LstdFlags | log.Llongfile)
 	log.Println("This is a test message")
@@ -223,7 +262,7 @@ func setup(config Config) (string, error) {
 		for _, line := range uniqueLines {
 			fmt.Println(line)
 		}
-		return "", nil
+		return nil
 	}
 
 	// Expand cwd into an absolute path
@@ -232,54 +271,13 @@ func setup(config Config) (string, error) {
 		log.Fatalf("Failed to get absolute path: %v", err)
 	}
 
-	var ip string
+	ip, err := getip()
+	if err != nil {
+		panic(err)
+	}
 
-	// Check if the ip flag was set
-	if config.IP != "" {
-		log.Println("Using provided IP address...")
-		ip = config.IP
-	} else {
-		log.Println("Running Terraform command to get output...")
-
-		cwd, err := os.Getwd()
-		if err != nil {
-			fmt.Println("Error getting current working directory:", err)
-			return "", err
-		}
-
-		tfpath := filepath.Join(cwd, "terraform")
-
-		cmdName := "terraform"
-		args := []string{fmt.Sprintf("-chdir=%s", tfpath), "output", "-json"}
-
-		// Prepare the command
-		cmd := exec.Command(cmdName, args...)
-
-		// Print string representation of the command
-		log.Printf("Executing command: %s %s", cmdName, strings.Join(args, " "))
-
-		// Run the command
-		out, err := cmd.Output()
-		if err != nil {
-			log.Fatalf("Failed to execute command: %v", err)
-		}
-
-		// Process output
-		// log.Println(string(out))
-
-		log.Println("Parsing JSON output...")
-
-		var tfOutput TerraformOutput
-		err = json.Unmarshal(out, &tfOutput)
-		if err != nil {
-			log.Fatalf("Failed to parse JSON: %v", err)
-		}
-
-		ip = tfOutput.InstancePublicIP.Value
-
-		if ip == "" {
-			log.Fatal("cound not get ip, quitting")
-		}
+	if ip == "" {
+		log.Fatal("cound not get ip, quitting")
 	}
 
 	log.Println("Creating launchd .plist file...")
@@ -312,7 +310,7 @@ func setup(config Config) (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Println("Error getting current directory:", err)
-		return "", err
+		return err
 	}
 	fmt.Println("CWD:", cwd)
 
@@ -320,7 +318,7 @@ func setup(config Config) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Println("Error getting home directory:", err)
-		return "", err
+		return err
 	}
 
 	// Join the home directory with the target path
@@ -368,10 +366,10 @@ func setup(config Config) (string, error) {
 	time.Sleep(500 * time.Millisecond)
 	searchLaunchdList(launctlTask)
 
-	return ip, nil
+	return nil
 }
 
-func dowork(ip string) {
+func dowork() {
 	// Set SSH user
 	user := "root"
 
@@ -394,6 +392,11 @@ func dowork(ip string) {
 	absLocalFile, err := filepath.Abs(localFile)
 	if err != nil {
 		log.Fatalf("Failed to get absolute path: %v", err)
+	}
+
+	ip, err := getip()
+	if err != nil {
+		panic(err)
 	}
 
 	// Create the command with scp and arguments
