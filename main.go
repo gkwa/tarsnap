@@ -373,12 +373,13 @@ func dowork() {
 	// Set SSH user
 	user := "root"
 
+	ip, err := getip()
+	if err != nil {
+		panic(err)
+	}
+
 	// Create local directory if it does not exist
 	localDir := "./data/bash_history"
-	err := os.MkdirAll(localDir, 0o755)
-	if err != nil {
-		log.Fatalf("Failed to create directory: %v", err)
-	}
 
 	localDir, err = filepath.Abs(localDir)
 	if err != nil {
@@ -394,9 +395,9 @@ func dowork() {
 		log.Fatalf("Failed to get absolute path: %v", err)
 	}
 
-	ip, err := getip()
+	err = os.MkdirAll(localDir, 0o755)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to create directory: %v", err)
 	}
 
 	// Create the command with scp and arguments
@@ -507,43 +508,5 @@ func loadLaunchdTarsnap(launctlTask, plist string) {
 	err := cmd.Run()
 	if err != nil {
 		log.Fatal(err)
-	}
-}
-
-func removeLaunchdTarsnap(launctlTask string) {
-	cmd := exec.Command("launchctl", "list")
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	err := cmd.Run()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if strings.Contains(out.String(), launctlTask) {
-		fmt.Printf("%s found, running launchctl remove %s\n", launctlTask, launctlTask)
-		cmd = exec.Command("launchctl", "remove", launctlTask)
-		err = cmd.Run()
-
-		if err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		fmt.Printf("%s not found\n", launctlTask)
-	}
-
-	// verify its no longer loaded
-	cmd = exec.Command("launchctl", "list")
-	var out3 bytes.Buffer
-	cmd.Stdout = &out3
-	err = cmd.Run()
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if strings.Contains(out3.String(), launctlTask) {
-		fmt.Printf("%s found, its still loaded but we expect it should have been reomoved\n", launctlTask)
-	} else {
-		fmt.Printf("%s not found, load failed\n", launctlTask)
 	}
 }
