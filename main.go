@@ -14,6 +14,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	"inet.af/netaddr"
 )
 
 // TerraformOutput is used to unmarshal the JSON output of the terraform command
@@ -244,8 +246,11 @@ func getip() (string, error) {
 		log.Fatalf("Failed to parse JSON: %v", err)
 	}
 
-	return tfOutput.InstancePublicIP.Value, err
+	if !isValidIPv4(tfOutput.InstancePublicIP.Value) {
+		log.Fatalf("'%s' is not a valid ip", tfOutput.InstancePublicIP.Value)
+	}
 
+	return tfOutput.InstancePublicIP.Value, err
 }
 
 func setup(config Config) error {
@@ -509,4 +514,12 @@ func loadLaunchdTarsnap(launctlTask, plist string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func isValidIPv4(ip string) bool {
+	parsedIP, err := netaddr.ParseIP(ip)
+	if err != nil {
+		return false
+	}
+	return parsedIP.Is4()
 }
