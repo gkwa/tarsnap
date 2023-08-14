@@ -69,7 +69,7 @@ const PlistTemplate = `
   <string>{{.Cwd}}</string>
 
   <key>RunAtLoad</key>
-  <true/>
+  <false/>
 </dict>
 </plist>
 `
