@@ -198,6 +198,9 @@ func main() {
 	flag.DurationVar(&config.Delay, "delay", 10*time.Minute, "Delay between successive fetches")
 	flag.Parse()
 
+	// deleteOldFiles()
+	moveOldFilesToTemp()
+
 	if config.Install {
 		err := setup(config)
 		if err != nil {
@@ -522,4 +525,47 @@ func isValidIPv4(ip string) bool {
 		return false
 	}
 	return parsedIP.Is4()
+}
+
+func moveOldFilesToTemp() {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Println("Error getting user's home directory:", err)
+		return
+	}
+
+	matchingPattern := filepath.Join(homeDir, "Library", "LaunchAgents", "com.tarsnap.*.*.*.*.plist")
+
+	files, err := filepath.Glob(matchingPattern)
+	if err != nil {
+		fmt.Println("Error matching files:", err)
+		return
+	}
+
+	now := time.Now()
+	twoDaysAgo := now.Add(-48 * time.Hour)
+
+	tmpDir := "/tmp" // Change this to the desired destination directory
+
+	for _, file := range files {
+		moveOldFileToTemp(file, tmpDir, twoDaysAgo)
+	}
+}
+
+func moveOldFileToTemp(filePath, destDir string, cutoff time.Time) {
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		fmt.Println("Error getting file info:", err)
+		return
+	}
+
+	if fileInfo.ModTime().Before(cutoff) {
+		newPath := filepath.Join(destDir, filepath.Base(filePath))
+		err := os.Rename(filePath, newPath)
+		if err != nil {
+			fmt.Println("Error moving file:", err)
+		} else {
+			fmt.Println("Moved:", filePath, "to", newPath)
+		}
+	}
 }
