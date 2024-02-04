@@ -76,21 +76,16 @@ const PlistTemplate = `
 
 // Generate data/bash_history/summary.txt that contains the unique list of bash lines
 func generateSummaryFile(logDir string) {
-	// Get the unique list of bash lines
 	uniqueLines := getUniqueBashLines(logDir)
 
-	// Create or open the summary.txt file
 	summaryFile, err := os.Create(filepath.Join(logDir, "summary.txt"))
 	if err != nil {
 		log.Fatalf("Failed to create summary.txt: %v", err)
 	}
 	defer summaryFile.Close()
 
-	// commands less than 10 chars are not worth saving
 	MAX_LEN := 10
-	// Write the unique lines to the summary file
 	for _, line := range uniqueLines {
-
 		if len(line) < MAX_LEN {
 			continue
 		}
@@ -103,7 +98,6 @@ func generateSummaryFile(logDir string) {
 	log.Println("Successfully generated summary.txt.")
 }
 
-// readLines reads all lines from a file and returns the line count and slice of lines
 func readLines(filename string) (int, []string, error) {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -124,7 +118,6 @@ func readLines(filename string) (int, []string, error) {
 	return len(lines), lines, nil
 }
 
-// getUniqueLineCount returns the count of unique lines in a slice
 func getUniqueLineCount(lines []string) int {
 	uniqueLines := make(map[string]struct{})
 	for _, line := range lines {
@@ -133,12 +126,9 @@ func getUniqueLineCount(lines []string) int {
 	return len(uniqueLines)
 }
 
-// getUniqueBashLines returns the unique list of bash lines from all data files
 func getUniqueBashLines(logDir string) []string {
-	// Map to store the unique lines
 	uniqueLines := make(map[string]struct{})
 
-	// Walk through the files in the directory
 	filepath.Walk(logDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			log.Fatalf("Failed to walk through files: %v", err)
@@ -170,7 +160,6 @@ func getUniqueBashLines(logDir string) []string {
 		return nil
 	})
 
-	// Convert the map keys to a slice of strings and return
 	var lines []string
 	for line := range uniqueLines {
 		lines = append(lines, line)
@@ -179,7 +168,6 @@ func getUniqueBashLines(logDir string) []string {
 	return lines
 }
 
-// Config struct to hold the values
 type Config struct {
 	IP       string
 	Label    string
