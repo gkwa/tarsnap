@@ -452,7 +452,6 @@ func dowork() {
 		}
 		return nil
 	})
-
 	if err != nil {
 		log.Fatalf("Failed to walk through files: %v", err)
 	}
